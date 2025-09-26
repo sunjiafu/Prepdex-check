@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>edgeX 积分计算器</title>
+  <style>
+    :root { --bg:#0f1223; --card:#15193a; --text:#e9ecff; --sub:#9aa3c7; --accent:#6ea8fe; --ok:#3bd671; --warn:#ffcc66; }
+    *{box-sizing:border-box} body{margin:0;background:linear-gradient(180deg,#0f1223,#0c0f20);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial}
+    header{padding:28px 20px 8px;text-align:center}
+    header h1{margin:0 0 6px;font-size:22px}
+    header p{margin:0;color:var(--sub)}
+    .wrap{max-width:960px;margin:18px auto;padding:0 16px}
+    .grid{display:grid;grid-template-columns:1fr;gap:14px}
+    @media(min-width:900px){.grid{grid-template-columns:1fr 1fr}}
+    .card{background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px 14px;box-shadow:0 4px 16px rgba(0,0,0,.25)}
+    .card h2{margin:0 0 8px;font-size:18px}
+    .row{display:flex;gap:10px;align-items:center;margin:10px 0}
+    label{flex:1;color:#cdd6ff}
+    input,select{flex:1.2;background:#0e1230;border:1px solid rgba(255,255,255,.12);color:var(--text);padding:10px 12px;border-radius:10px;outline:none}
+    input:focus,select:focus{border-color:var(--accent)}
+    .muted{color:var(--sub);font-size:13px}
+    .note{font-size:13px;color:#b6c1ff}
+    .out{font-variant-numeric:tabular-nums;background:#0d1130;border-radius:10px;padding:10px 12px;border:1px dashed rgba(255,255,255,.15)}
+    .kpi{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .pill{padding:10px 12px;background:#0d1232;border-radius:10px;border:1px solid rgba(255,255,255,.08)}
+    .pill b{display:block;font-size:18px;margin-bottom:4px}
+    .ok{color:var(--ok)} .warn{color:var(--warn)}
+    .footer{color:#93a0d3;font-size:12px;text-align:center;margin:18px 0}
+    .seg{height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.12),transparent);margin:12px 0}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>edgeX 积分计算器</h1>
+    <p>支持计算：按平台总交易量和自定义奖池计算你的积分</p>
+  </header>
+
+  <div class="wrap grid">
+    <!-- 输入部分 -->
+    <section class="card">
+      <h2>输入</h2>
+      <div class="row">
+        <label>平台本周总交易量 (USD)</label>
+        <input id="totalVol" type="number" inputmode="decimal" placeholder="如 14352605167" />
+      </div>
+
+      <div class="row">
+        <label>本周积分奖池 (Points)</label>
+        <input id="poolPoints" type="number" inputmode="decimal" placeholder="如 250000" />
+      </div>
+
+      <div class="row">
+        <label>你的本周交易量 (USD)</label>
+        <input id="yourVol" type="number" inputmode="decimal" placeholder="如 1000000" />
+      </div>
+
+      <div class="row">
+        <label>手续费率 Maker (%)</label>
+        <input id="makerFee" type="number" inputmode="decimal" placeholder="0.015" />
+      </div>
+
+      <div class="row">
+        <label>手续费率 Taker (%)</label>
+        <input id="takerFee" type="number" inputmode="decimal" placeholder="0.038" />
+      </div>
+
+      <div class="row">
+        <label>杠杆倍数</label>
+        <input id="leverage" type="number" inputmode="decimal" placeholder="15" />
+      </div>
+
+      <p class="note">提示：edgeX 近期常见基础费率 Maker 0.015% / Taker 0.038%。可按你的真实费率或 VIP/NFT 折扣更新。</p>
+    </section>
+
+    <!-- 输出部分 -->
+    <section class="card">
+      <h2>结果</h2>
+      <div class="kpi">
+        <div class="pill"><b id="calcUsdPerPoint">—</b><span class="muted">1 分所需交易量</span></div>
+        <div class="pill"><b id="pointsGained">—</b><span class="muted">本周预计获得积分</span></div>
+        <div class="pill"><b id="makerCost">—</b><span class="muted">刷 1 分手续费（Maker）</span></div>
+        <div class="pill"><b id="takerCost">—</b><span class="muted">刷 1 分手续费（Taker）</span></div>
+        <div class="pill"><b id="minMargin">—</b><span class="muted">刷 1 分所需最低保证金</span></div>
+        <div class="pill"><b id="dailyVolFor1">—</b><span class="muted">每天拿 1 分需交易量</span></div>
+      </div>
+      <div class="seg"></div>
+      <div class="out" id="explain">请在左侧填写参数，结果将实时计算。</div>
+    </section>
+  </div>
+
+  <div class="footer">
+    <p>作者：<a href="https://twitter.com/web3_dadgod" target="_blank">@web3_dadgod</a></p>
+    <p>更多平台功能敬请期待：“Coming Soon”。</p>
+  </div>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const fmtNum = v => isFinite(v) ? Number(v).toLocaleString(undefined,{maximumFractionDigits:2}) : '—';
+  const lsKey = 'edgex-calc-v1';
+
+  const ids = ["totalVol", "poolPoints", "yourVol", "makerFee", "takerFee", "leverage"];
+  // 默认值（可根据你当前周情况改）
+  const defaults = {
+    totalVol: 14352605167,
+    poolPoints: 250000,
+    yourVol: 1000000,
+    makerFee: 0.015,
+    takerFee: 0.038,
+    leverage: 15
+  };
+
+  // 载入 & 绑定
+  function load(){
+    let stash = {};
+    try{ stash = JSON.parse(localStorage.getItem(lsKey) || "{}"); }catch(e){}
+    ids.forEach(k=>{
+      const el = $(k);
+      const val = (k in stash) ? stash[k] : defaults[k];
+      if (el) el.value = val;
+    });
+    compute();
+  }
+
+  function save(){
+    const data = {};
+    ids.forEach(k => data[k] = $(k).value);
+    localStorage.setItem(lsKey, JSON.stringify(data));
+  }
+
+  function toNum(x){ const v = parseFloat(x); return isFinite(v) ? v : NaN; }
+
+  function compute(){
+    save();
+    const yourVol   = toNum($("yourVol").value);
+    const makerFee  = toNum($("makerFee").value) / 100; // 转换为小数
+    const takerFee  = toNum($("takerFee").value) / 100;
+    const leverage  = toNum($("leverage").value);
+
+    const totalVol   = toNum($("totalVol").value);
+    const poolPoints = toNum($("poolPoints").value);
+
+    let usdPerPoint = totalVol / (poolPoints * 0.60); // 交易量分配占奖池 60%
+    const points = (isFinite(yourVol) && isFinite(usdPerPoint) && usdPerPoint>0) ? (yourVol / usdPerPoint) : NaN;
+    const makerCost1 = isFinite(usdPerPoint) ? usdPerPoint * makerFee : NaN;
+    const takerCost1 = isFinite(usdPerPoint) ? usdPerPoint * takerFee : NaN;
+    const minMargin1 = (isFinite(usdPerPoint) && isFinite(leverage) && leverage>0) ? (usdPerPoint / leverage) : NaN;
+    const dailyVolFor1 = isFinite(usdPerPoint) ? usdPerPoint : NaN;
+
+    $("calcUsdPerPoint").textContent = isFinite(usdPerPoint) ? `$ ${fmtNum(usdPerPoint)}` : "—";
+    $("pointsGained").textContent    = isFinite(points) ? fmtNum(points) : "—";
+    $("makerCost").textContent       = isFinite(makerCost1) ? `$ ${fmtNum(makerCost1)}` : "—";
+    $("takerCost").textContent       = isFinite(takerCost1) ? `$ ${fmtNum(takerCost1)}` : "—";
+    $("minMargin").textContent       = isFinite(minMargin1) ? `$ ${fmtNum(minMargin1)}` : "—";
+    $("dailyVolFor1").textContent    = isFinite(dailyVolFor1) ? `$ ${fmtNum(dailyVolFor1)}` : "—";
+
+    $("explain").innerHTML =
+      isFinite(points)
+        ? `根据当前参数，若你本周交易量为 <b>$${fmtNum(yourVol)}</b>，将从“交易量 60%”预计获得 <b>${fmtNum(points)}</b> 分。<br>
+           当前 1 分≈ <b>$${fmtNum(usdPerPoint)}</b> 的交易量；Maker 刷 1 分预计手续费 <b class="ok">$${fmtNum(makerCost1)}</b>，Taker 约 <b class="warn">$${fmtNum(takerCost1)}</b>。
+           若使用杠杆 <b>${fmtNum($("leverage").value)}</b>×，刷 1 分最低保证金约 <b>$${fmtNum(minMargin1)}</b>。`
+        : `请完善左侧参数。`;
+  }
+
+  ids.forEach(k => { const el=$(k); if(el){ el.addEventListener("input",compute); }});
+  load();
+})();
+</script>
+</body>
+</html>
